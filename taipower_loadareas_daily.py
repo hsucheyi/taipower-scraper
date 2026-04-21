@@ -1,206 +1,162 @@
-#!/usr/bin/env python3
-"""Download Taipower regional load data for today 00:00-11:50 and save to CSV.
-
-Source:
-  https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv
-
-Expected CSV columns in source:
-  time,east,north,center,south
-Unit:
-  萬瓩
-
-Output filename example:
-  output/taipower_loadareas_2026-04-21_0000_1150.csv
-"""
-
-from __future__ import annotations
-
 import argparse
 import csv
+import io
+import os
 import sys
-from dataclasses import dataclass
+import time
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
 
+import pandas as pd
 import requests
 
-SOURCE_URL = "https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv"
-TIMEZONE_NAME = "Asia/Taipei"
-OUTPUT_DIR_DEFAULT = "output"
-TARGET_END_MINUTES = 11 * 60 + 50
-EXPECTED_COLUMNS = ["time", "east", "north", "center", "south"]
+PAGE_URL = "https://www.taipower.com.tw/2289/2363/2367/2368/10263/normalPost"
+CSV_URL = "https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv"
+
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/csv,text/plain,*/*",
+    "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
+    "Referer": PAGE_URL,
+    "Connection": "keep-alive",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+}
 
 
-@dataclass
-class Record:
-    time: str
-    east: float
-    north: float
-    center: float
-    south: float
-
-    @property
-    def total(self) -> float:
-        return self.east + self.north + self.center + self.south
-
-    def as_row(self, date_str: str) -> dict[str, object]:
-        return {
-            "date": date_str,
-            "time": self.time,
-            "east": self.east,
-            "north": self.north,
-            "center": self.center,
-            "south": self.south,
-            "total": round(self.total, 1),
-            "unit": "萬瓩",
-            "source_url": SOURCE_URL,
-        }
+def build_session() -> requests.Session:
+    s = requests.Session()
+    s.headers.update(HEADERS)
+    return s
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Fetch Taipower regional load data and save today's 00:00-11:50 records to CSV."
-    )
-    parser.add_argument(
-        "--output-dir",
-        default=OUTPUT_DIR_DEFAULT,
-        help=f"Directory for CSV output (default: {OUTPUT_DIR_DEFAULT})",
-    )
-    parser.add_argument(
-        "--timeout",
-        type=int,
-        default=30,
-        help="HTTP timeout in seconds (default: 30)",
-    )
-    parser.add_argument(
-        "--filename",
-        default="",
-        help="Optional output filename. If omitted, an automatic name is used.",
-    )
-    return parser.parse_args()
+def fetch_csv_text(session: requests.Session) -> str:
+    # 先進頁面拿 cookie / 建立正常來源脈絡
+    page_resp = session.get(PAGE_URL, timeout=30)
+    page_resp.raise_for_status()
+
+    last_error = None
+    candidate_urls = [
+        CSV_URL,
+        f"{CSV_URL}?_ts={int(time.time())}",
+    ]
+
+    for url in candidate_urls:
+        try:
+            resp = session.get(url, timeout=30)
+            resp.raise_for_status()
+            resp.encoding = resp.encoding or "utf-8"
+            text = resp.text.strip()
+            if text:
+                return text
+        except Exception as e:
+            last_error = e
+
+    raise RuntimeError(f"download failed after retries: {last_error}")
 
 
-def normalize_time_label(raw: str) -> str | None:
-    value = raw.strip()
-    if not value:
-        return None
-    if ":" not in value:
-        value = f"{value}:00"
-    hh_str, mm_str = value.split(":", 1)
-    try:
-        hh = int(hh_str)
-        mm = int(mm_str)
-    except ValueError:
-        return None
-    if hh < 0 or hh > 23 or mm < 0 or mm > 59:
-        return None
-    return f"{hh:02d}:{mm:02d}"
+def normalize_time_str(t: str) -> str:
+    t = t.strip()
+    if not t:
+        return ""
+
+    # 例如 "00" -> "00:00", "01" -> "01:00"
+    if ":" not in t:
+        if t.isdigit():
+            return f"{int(t):02d}:00"
+
+    hh, mm = t.split(":")
+    return f"{int(hh):02d}:{int(mm):02d}"
 
 
-def to_minutes(hhmm: str) -> int:
-    hh, mm = hhmm.split(":")
-    return int(hh) * 60 + int(mm)
+def parse_csv_text(csv_text: str, target_date: str) -> pd.DataFrame:
+    rows = []
+    reader = csv.reader(io.StringIO(csv_text))
 
-
-def fetch_source_csv(timeout: int) -> str:
-    headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; TaipowerLoadAreasBot/1.0)",
-        "Accept": "text/csv,text/plain,*/*",
-        "Referer": "https://www.taipower.com.tw/2289/2363/2367/2368/10263/normalPost",
-    }
-    response = requests.get(SOURCE_URL, headers=headers, timeout=timeout)
-    response.raise_for_status()
-    response.encoding = response.apparent_encoding or "utf-8"
-    return response.text
-
-
-def parse_records(csv_text: str) -> list[Record]:
-    records: list[Record] = []
-    reader = csv.reader(csv_text.splitlines())
     for row in reader:
+        # 跳過空列
+        if not row or all(not str(x).strip() for x in row):
+            continue
+
+        # 只取前五欄：時間 + 東北中南
+        row = [str(x).strip() for x in row[:5]]
         if len(row) < 5:
             continue
-        time_label = normalize_time_label(row[0])
-        if not time_label:
-            continue
+
+        raw_time = row[0]
         try:
-            east = float(row[1])
-            north = float(row[2])
-            center = float(row[3])
-            south = float(row[4])
-        except ValueError:
+            t = normalize_time_str(raw_time)
+            dt = datetime.strptime(t, "%H:%M")
+        except Exception:
+            # 不是資料列就跳過
             continue
-        if to_minutes(time_label) <= TARGET_END_MINUTES:
-            records.append(
-                Record(
-                    time=time_label,
-                    east=east,
-                    north=north,
-                    center=center,
-                    south=south,
-                )
-            )
-    records.sort(key=lambda item: to_minutes(item.time))
-    deduped: list[Record] = []
-    seen: set[str] = set()
-    for item in records:
-        if item.time in seen:
+
+        if not ("00:00" <= t <= "11:50"):
             continue
-        seen.add(item.time)
-        deduped.append(item)
-    return deduped
+
+        def to_num(x):
+            try:
+                return float(x)
+            except Exception:
+                return None
+
+        east = to_num(row[1])
+        north = to_num(row[2])
+        center = to_num(row[3])
+        south = to_num(row[4])
+
+        total = None
+        if all(v is not None for v in [east, north, center, south]):
+            total = east + north + center + south
+
+        rows.append(
+            {
+                "date": target_date,
+                "time": t,
+                "east": east,
+                "north": north,
+                "center": center,
+                "south": south,
+                "total": total,
+                "unit": "萬瓩",
+                "source_url": CSV_URL,
+            }
+        )
+
+    if not rows:
+        raise RuntimeError("parsed 0 rows from CSV")
+
+    df = pd.DataFrame(rows).sort_values(["date", "time"]).reset_index(drop=True)
+    return df
 
 
-def resolve_output_path(output_dir: str, filename: str, today_str: str) -> Path:
-    base_dir = Path(output_dir)
-    base_dir.mkdir(parents=True, exist_ok=True)
-    if filename:
-        return base_dir / filename
-    auto_name = f"taipower_loadareas_{today_str}_0000_1150.csv"
-    return base_dir / auto_name
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--output-dir", default="output")
+    args = parser.parse_args()
 
+    os.makedirs(args.output_dir, exist_ok=True)
 
-def write_output(path: Path, rows: Iterable[dict[str, object]]) -> None:
-    fieldnames = [
-        "date",
-        "time",
-        "east",
-        "north",
-        "center",
-        "south",
-        "total",
-        "unit",
-        "source_url",
-    ]
-    with path.open("w", newline="", encoding="utf-8-sig") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow(row)
+    target_date = datetime.now().strftime("%Y-%m-%d")
 
+    session = build_session()
+    csv_text = fetch_csv_text(session)
+    df = parse_csv_text(csv_text, target_date)
 
-def main() -> int:
-    args = parse_args()
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    try:
-        csv_text = fetch_source_csv(timeout=args.timeout)
-        records = parse_records(csv_text)
-    except requests.RequestException as exc:
-        print(f"[ERROR] download failed: {exc}", file=sys.stderr)
-        return 1
+    output_path = Path(args.output_dir) / f"taipower_loadareas_{target_date}_0000_1150.csv"
+    df.to_csv(output_path, index=False, encoding="utf-8-sig")
 
-    if not records:
-        print("[ERROR] no valid records found in source CSV", file=sys.stderr)
-        return 2
-
-    output_path = resolve_output_path(args.output_dir, args.filename, today_str)
-    write_output(output_path, (r.as_row(today_str) for r in records))
     print(f"saved: {output_path}")
-    print(f"rows: {len(records)}")
-    print(f"time_range: {records[0].time} -> {records[-1].time}")
-    return 0
+    print(f"rows: {len(df)}")
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        main()
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)

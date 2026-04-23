@@ -9,7 +9,7 @@ from pathlib import Path
 import pandas as pd
 from playwright.sync_api import sync_playwright
 
-PAGE_URL = "https://www.taipower.com.tw/d006/loadGraph/loadGraph/load_areas_.html"
+ENTRY_URL = "https://www.taipower.com.tw/"
 CSV_URL = "https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv"
 
 
@@ -38,7 +38,8 @@ def fetch_csv_text_with_browser() -> str:
         )
         page = context.new_page()
 
-        resp = page.goto(PAGE_URL, wait_until="domcontentloaded", timeout=60000)
+        # 改成先進台電首頁，不進容易 403 的 load_areas_.html
+        resp = page.goto(ENTRY_URL, wait_until="domcontentloaded", timeout=60000)
         if resp is None:
             raise RuntimeError("failed to open entry page")
         if resp.status >= 400:
@@ -49,7 +50,10 @@ def fetch_csv_text_with_browser() -> str:
                 const r = await fetch(url, {
                     method: 'GET',
                     credentials: 'include',
-                    cache: 'no-store'
+                    cache: 'no-store',
+                    headers: {
+                        'Accept': 'text/csv, text/plain, */*'
+                    }
                 });
                 if (!r.ok) {
                     throw new Error(`csv fetch failed: HTTP ${r.status}`);

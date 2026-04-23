@@ -5,10 +5,10 @@ import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urljoin
 
-import requests
-from bs4 import BeautifulSoup
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import sync_playwright
+
 
 PAGE_URL = "https://www.taipower.com.tw/2289/2363/2373/2375/10359/normalPost"
 BASE_DIR = Path("data/generation_cost_pdf")
@@ -42,45 +42,76 @@ def save_metadata(data: dict) -> None:
     )
 
 
-def find_pdf_link(html: str, base_url: str) -> tuple[str, str]:
-    soup = BeautifulSoup(html, "html.parser")
+def download_pdf_via_browser() -> tuple[bytes, str, str]:
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(
+            accept_downloads=True,
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            locale="zh-TW",
+        )
+        page = context.new_page()
 
-    # 優先找 href 直接指向 .pdf 的連結
-    for a in soup.find_all("a", href=True):
-        href = a["href"].strip()
-        text = a.get_text(" ", strip=True)
-        if ".pdf" in href.lower():
-            return urljoin(base_url, href), text
+        try:
+            page.goto(PAGE_URL, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_load_state("networkidle", timeout=60000)
+        except PlaywrightTimeoutError:
+            # 某些網站 networkidle 可能不穩，至少頁面已打開就繼續找連結
+            pass
 
-    # 備援：找文字包含 PDF 的連結
-    for a in soup.find_all("a", href=True):
-        href = a["href"].strip()
-        text = a.get_text(" ", strip=True)
-        if "pdf" in text.lower():
-            return urljoin(base_url, href), text
+        # 優先找 href 直接含 .pdf 的連結
+        pdf_link = page.locator("a[href*='.pdf']").first
+        title = ""
+        pdf_url = ""
 
-    raise RuntimeError("找不到 PDF 連結")
+        if pdf_link.count() > 0:
+            title = pdf_link.inner_text().strip()
+            pdf_url = pdf_link.get_attribute("href") or ""
+
+            with page.expect_download(timeout=60000) as download_info:
+                pdf_link.click()
+
+            download = download_info.value
+            temp_path = download.path()
+            pdf_bytes = Path(temp_path).read_bytes() if temp_path else b""
+            if not pdf_bytes:
+                raise RuntimeError("PDF 下載成功但檔案內容為空")
+
+            browser.close()
+            return pdf_bytes, title, download.url
+
+        # 備援：找文字含 PDF 的連結
+        text_link = page.locator("a", has_text="PDF").first
+        if text_link.count() == 0:
+            browser.close()
+            raise RuntimeError("找不到 PDF 連結")
+
+        title = text_link.inner_text().strip()
+        pdf_url = text_link.get_attribute("href") or ""
+
+        with page.expect_download(timeout=60000) as download_info:
+            text_link.click()
+
+        download = download_info.value
+        temp_path = download.path()
+        pdf_bytes = Path(temp_path).read_bytes() if temp_path else b""
+        if not pdf_bytes:
+            browser.close()
+            raise RuntimeError("PDF 下載成功但檔案內容為空")
+
+        browser.close()
+        return pdf_bytes, title, download.url or pdf_url
 
 
 def main() -> int:
     BASE_DIR.mkdir(parents=True, exist_ok=True)
     ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
 
-    session = requests.Session()
-    session.headers.update(
-        {
-            "User-Agent": "Mozilla/5.0 (compatible; GitHubActions Taipower PDF Watcher)"
-        }
-    )
-
-    page_resp = session.get(PAGE_URL, timeout=30)
-    page_resp.raise_for_status()
-
-    pdf_url, title = find_pdf_link(page_resp.text, PAGE_URL)
-
-    pdf_resp = session.get(pdf_url, timeout=60)
-    pdf_resp.raise_for_status()
-    pdf_bytes = pdf_resp.content
+    pdf_bytes, title, pdf_url = download_pdf_via_browser()
 
     new_sha = sha256_bytes(pdf_bytes)
     old_metadata = load_metadata()

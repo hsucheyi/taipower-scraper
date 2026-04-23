@@ -87,7 +87,7 @@ def parse_csv_text(csv_text: str, target_date: str) -> pd.DataFrame:
             continue
 
         # 原本穩定版只抓到 11:50
-        if not ("00:00" <= t <= "11:50"):
+        if not ("00:00" <= t <= "23:50"):
             continue
 
         def to_num(x):

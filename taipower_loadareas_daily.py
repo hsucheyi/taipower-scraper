@@ -2,13 +2,17 @@ import argparse
 import io
 import os
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 from playwright.sync_api import sync_playwright
 
-ENTRY_URL = "https://www.taipower.com.tw/"
+ENTRY_URLS = [
+    "https://www.taipower.com.tw/",
+    "https://www.taipower.com.tw/2289/2363/2367/2368/10263/normalPost",
+]
 CSV_URL = "https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv"
 
 
@@ -24,7 +28,46 @@ def normalize_time_str(t: str) -> str:
     return f"{int(hh):02d}:{int(mm):02d}"
 
 
+def try_fetch_in_page(page, csv_url: str) -> str:
+    return page.evaluate(
+        """async (url) => {
+            const r = await fetch(url, {
+                method: 'GET',
+                credentials: 'include',
+                cache: 'no-store',
+                headers: {
+                    'Accept': 'text/csv, text/plain, */*'
+                }
+            });
+            if (!r.ok) {
+                throw new Error(`csv fetch failed: HTTP ${r.status}`);
+            }
+            return await r.text();
+        }""",
+        csv_url + "?_ts=" + str(int(time.time() * 1000)),
+    )
+
+
+def try_fetch_with_request(context, csv_url: str) -> str:
+    resp = context.request.get(
+        csv_url + "?_ts=" + str(int(time.time() * 1000)),
+        headers={
+            "Accept": "text/csv, text/plain, */*",
+            "Referer": "https://www.taipower.com.tw/",
+            "Origin": "https://www.taipower.com.tw",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+        },
+        timeout=60000,
+    )
+    if not resp.ok:
+        raise RuntimeError(f"csv fetch failed: HTTP {resp.status}")
+    return resp.text()
+
+
 def fetch_csv_text_with_browser() -> str:
+    errors = []
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
@@ -34,41 +77,49 @@ def fetch_csv_text_with_browser() -> str:
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/124.0.0.0 Safari/537.36"
             ),
+            extra_http_headers={
+                "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
+            },
         )
         page = context.new_page()
 
-        # 不進會 403 的圖表頁，先進首頁建立正常第一方瀏覽器脈絡
-        resp = page.goto(ENTRY_URL, wait_until="domcontentloaded", timeout=60000)
-        if resp is None:
-            raise RuntimeError("failed to open entry page")
-        if resp.status >= 400:
-            raise RuntimeError(f"entry page failed: HTTP {resp.status}")
+        try:
+            # 先試兩個不同的 entry page，建立第一方瀏覽器脈絡
+            for entry_url in ENTRY_URLS:
+                try:
+                    resp = page.goto(entry_url, wait_until="domcontentloaded", timeout=60000)
+                    if resp is None:
+                        raise RuntimeError("empty response")
+                    if resp.status >= 400:
+                        raise RuntimeError(f"entry page failed: HTTP {resp.status}")
 
-        csv_text = page.evaluate(
-            """async (url) => {
-                const r = await fetch(url, {
-                    method: 'GET',
-                    credentials: 'include',
-                    cache: 'no-store',
-                    headers: {
-                        'Accept': 'text/csv, text/plain, */*'
-                    }
-                });
-                if (!r.ok) {
-                    throw new Error(`csv fetch failed: HTTP ${r.status}`);
-                }
-                return await r.text();
-            }""",
-            CSV_URL + "?_ts=" + String(Date.now()),
-        )
+                    try:
+                        page.wait_for_load_state("networkidle", timeout=5000)
+                    except Exception:
+                        pass
 
-        browser.close()
+                    csv_text = try_fetch_in_page(page, CSV_URL)
+                    csv_text = (csv_text or "").strip()
+                    if csv_text:
+                        print(f"fetched via in-page fetch from: {entry_url}")
+                        return csv_text
+                except Exception as e:
+                    errors.append(f"in-page via {entry_url}: {e}")
 
-    csv_text = (csv_text or "").strip()
-    if not csv_text:
-        raise RuntimeError("empty CSV response")
+            # 最後再退回 request API
+            try:
+                csv_text = try_fetch_with_request(context, CSV_URL)
+                csv_text = (csv_text or "").strip()
+                if csv_text:
+                    print("fetched via context.request.get fallback")
+                    return csv_text
+            except Exception as e:
+                errors.append(f"request fallback: {e}")
 
-    return csv_text
+        finally:
+            browser.close()
+
+    raise RuntimeError(" | ".join(errors))
 
 
 def parse_csv_text(csv_text: str, target_date: str) -> pd.DataFrame:
@@ -99,8 +150,7 @@ def parse_csv_text(csv_text: str, target_date: str) -> pd.DataFrame:
         ["date", "time", "east", "north", "center", "south", "total", "unit", "source_url", "fetched_at"]
     ].copy()
 
-    df = df.sort_values(["date", "time"]).reset_index(drop=True)
-    return df
+    return df.sort_values(["date", "time"]).reset_index(drop=True)
 
 
 def upsert_excel(df_new: pd.DataFrame, excel_path: Path, sheet_name: str) -> None:
@@ -120,7 +170,6 @@ def upsert_excel(df_new: pd.DataFrame, excel_path: Path, sheet_name: str) -> Non
 
     df_all["date"] = df_all["date"].astype(str)
     df_all["time"] = df_all["time"].astype(str)
-
     df_all = (
         df_all.sort_values(["date", "time"])
         .drop_duplicates(subset=["date", "time"], keep="last")

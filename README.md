@@ -1,16 +1,24 @@
-# taipower-scraper
+# Taipower Scraper
 
-這個 repo 用來抓取台電公開資料，目前包含：
+自動抓取台電「各區域用電負載」資料，並每日保存與累積歷史紀錄。
 
-- `taipower_loadareas_daily.py`
-  - 每日抓取負載區域相關資料
-- `scripts/generation_cost_pdf_watcher.py`
-  - 每週檢查台電「各種發電方式之發電成本」PDF 是否更新
-  - 若更新則下載並保存到 `data/generation_cost_pdf/`
+---
 
-## 結構
+## 📌 功能介紹
 
-```text
-.github/workflows/
-scripts/
-data/
+本專案會：
+
+- ⏱️ 每天自動抓取台電區域用電資料（10 分鐘粒度）
+- 📊 取得當日 `00:00 → 23:50` 全部資料（共 144 筆）
+- 📁 儲存每日 CSV 檔案
+- 📈 將所有歷史資料累積到同一個 Excel 檔案
+- 🔄 使用 GitHub Actions 自動執行與版本控制
+
+---
+
+## 📂 資料輸出
+
+### 1️⃣ 每日 CSV（當日資料）
+
+```bash
+output/taipower_loadareas_YYYY-MM-DD_0000_2350.csv

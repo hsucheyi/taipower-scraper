@@ -15,7 +15,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -26,11 +26,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
 
       - name: Run PDF watcher
         id: watcher
         run: |
           python scripts/generation_cost_pdf_watcher.py | tee output.txt
+          echo "==== ls data/generation_cost_pdf ===="
+          ls -R data/generation_cost_pdf || true
           if grep -q "UPDATED=true" output.txt; then
             echo "updated=true" >> "$GITHUB_OUTPUT"
           else

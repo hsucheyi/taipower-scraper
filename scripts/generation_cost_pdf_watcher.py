@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -28,28 +29,30 @@ def sanitize_filename(name: str) -> str:
 
 def load_metadata() -> dict:
     if METADATA_FILE.exists():
-        return json.loads(METADATA_FILE.read_text(encoding="utf-8"))
+        text = METADATA_FILE.read_text(encoding="utf-8").strip()
+        if text:
+            return json.loads(text)
     return {}
 
 
 def save_metadata(data: dict) -> None:
     METADATA_FILE.write_text(
         json.dumps(data, ensure_ascii=False, indent=2),
-        encoding="utf-8"
+        encoding="utf-8",
     )
 
 
 def find_pdf_link(html: str, base_url: str) -> tuple[str, str]:
     soup = BeautifulSoup(html, "html.parser")
 
-    # 優先找 href 直接含 .pdf 的連結
+    # 優先找 href 直接指向 .pdf 的連結
     for a in soup.find_all("a", href=True):
         href = a["href"].strip()
         text = a.get_text(" ", strip=True)
         if ".pdf" in href.lower():
             return urljoin(base_url, href), text
 
-    # 備援：找文字含 PDF 的連結
+    # 備援：找文字包含 PDF 的連結
     for a in soup.find_all("a", href=True):
         href = a["href"].strip()
         text = a.get_text(" ", strip=True)
@@ -64,9 +67,11 @@ def main() -> int:
     ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
 
     session = requests.Session()
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (compatible; GitHubActions Taipower PDF Watcher)"
-    })
+    session.headers.update(
+        {
+            "User-Agent": "Mozilla/5.0 (compatible; GitHubActions Taipower PDF Watcher)"
+        }
+    )
 
     page_resp = session.get(PAGE_URL, timeout=30)
     page_resp.raise_for_status()
@@ -84,13 +89,14 @@ def main() -> int:
     if new_sha == old_sha:
         print("UPDATED=false")
         print("No change detected.")
+        print(f"TITLE={title}")
+        print(f"PDF_URL={pdf_url}")
         return 0
 
-    # 寫 latest
     LATEST_PDF.write_bytes(pdf_bytes)
 
-    # 寫 archive
-    archive_name = sanitize_filename(title) + ".pdf"
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    archive_name = f"{timestamp}_{sanitize_filename(title)}.pdf"
     archive_path = ARCHIVE_DIR / archive_name
     archive_path.write_bytes(pdf_bytes)
 
@@ -101,6 +107,7 @@ def main() -> int:
         "sha256": new_sha,
         "latest_file": str(LATEST_PDF),
         "archived_file": str(archive_path),
+        "fetched_at_utc": datetime.now(timezone.utc).isoformat(),
     }
     save_metadata(metadata)
 

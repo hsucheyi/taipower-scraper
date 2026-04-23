@@ -1,24 +1,25 @@
-name: Taipower Scraper
+name: Taipower Loadareas Daily
 
 on:
   schedule:
-    - cron: '55 15 * * *'   # 台灣時間 23:55
+    - cron: "55 15 * * *" # 台灣時間 23:55
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   run-scraper:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Install packages
         run: |
@@ -27,16 +28,16 @@ jobs:
 
       - name: Install Playwright browser
         run: |
-          python -m playwright install chromium
-          python -m playwright install-deps chromium
+          python -m playwright install --with-deps chromium
 
       - name: Run scraper
-        run: python taipower_loadareas_daily.py --output-dir output
+        run: |
+          python taipower_loadareas_daily.py --output-dir output --excel-name taipower_loadareas.xlsx --sheet-name loadareas
 
-      - name: Commit CSV
+      - name: Commit Excel
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
-          git add output/*.csv
-          git commit -m "update data" || echo "no changes"
+          git add output/taipower_loadareas.xlsx
+          git commit -m "update loadareas excel" || echo "no changes"
           git push

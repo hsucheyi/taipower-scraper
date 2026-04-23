@@ -31,13 +31,12 @@ jobs:
           python -m playwright install --with-deps chromium
 
       - name: Run scraper
-        run: |
-          python taipower_loadareas_daily.py --output-dir output --excel-name taipower_loadareas.xlsx --sheet-name loadareas
+        run: python taipower_loadareas_daily.py --output-dir output
 
-      - name: Commit Excel
+      - name: Commit CSV
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
-          git add output/taipower_loadareas.xlsx
-          git commit -m "update loadareas excel" || echo "no changes"
+          git add output/*.csv
+          git commit -m "update data" || echo "no changes"
           git push

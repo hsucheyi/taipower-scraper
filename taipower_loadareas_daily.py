@@ -18,7 +18,6 @@ def normalize_time_str(t: str) -> str:
     if not t:
         return ""
 
-    # "00" -> "00:00"
     if ":" not in t and t.isdigit():
         return f"{int(t):02d}:00"
 
@@ -39,14 +38,12 @@ def fetch_csv_text_with_browser() -> str:
         )
         page = context.new_page()
 
-        # 先進公開圖表頁，建立正常瀏覽器脈絡
         resp = page.goto(PAGE_URL, wait_until="domcontentloaded", timeout=60000)
         if resp is None:
             raise RuntimeError("failed to open entry page")
         if resp.status >= 400:
             raise RuntimeError(f"entry page failed: HTTP {resp.status}")
 
-        # 在瀏覽器上下文抓 CSV，較不容易被站方當成 bot requests 擋掉
         csv_text = page.evaluate(
             """async (url) => {
                 const r = await fetch(url, {
@@ -59,15 +56,16 @@ def fetch_csv_text_with_browser() -> str:
                 }
                 return await r.text();
             }""",
-            CSV_URL + "?_ts=" + str(int(datetime.now().timestamp()))
+            CSV_URL + "?_ts=" + str(int(datetime.now().timestamp())),
         )
 
         browser.close()
 
-        csv_text = (csv_text or "").strip()
-        if not csv_text:
-            raise RuntimeError("empty CSV response")
-        return csv_text
+    csv_text = (csv_text or "").strip()
+    if not csv_text:
+        raise RuntimeError("empty CSV response")
+
+    return csv_text
 
 
 def parse_csv_text(csv_text: str, target_date: str) -> pd.DataFrame:
@@ -89,7 +87,8 @@ def parse_csv_text(csv_text: str, target_date: str) -> pd.DataFrame:
         except Exception:
             continue
 
-        if not ("00:00" <= t <= "11:50"):
+        # 抓當天完整區間 00:00 ~ 23:50
+        if not ("00:00" <= t <= "23:50"):
             continue
 
         def to_num(x):
@@ -118,6 +117,7 @@ def parse_csv_text(csv_text: str, target_date: str) -> pd.DataFrame:
                 "total": total,
                 "unit": "萬瓩",
                 "source_url": CSV_URL,
+                "fetched_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
         )
 
@@ -128,22 +128,52 @@ def parse_csv_text(csv_text: str, target_date: str) -> pd.DataFrame:
     return df
 
 
+def upsert_excel(df_new: pd.DataFrame, excel_path: Path, sheet_name: str) -> None:
+    if excel_path.exists():
+        df_old = pd.read_excel(excel_path, sheet_name=sheet_name, engine="openpyxl")
+
+        # 移除同一天舊資料，避免重跑重複
+        target_dates = set(df_new["date"].astype(str).unique())
+        if "date" in df_old.columns:
+            df_old = df_old[~df_old["date"].astype(str).isin(target_dates)]
+
+        df_all = pd.concat([df_old, df_new], ignore_index=True)
+    else:
+        df_all = df_new.copy()
+
+    df_all["date"] = df_all["date"].astype(str)
+    df_all["time"] = df_all["time"].astype(str)
+
+    df_all = (
+        df_all.sort_values(["date", "time"])
+        .drop_duplicates(subset=["date", "time"], keep="last")
+        .reset_index(drop=True)
+    )
+
+    with pd.ExcelWriter(excel_path, engine="openpyxl", mode="w") as writer:
+        df_all.to_excel(writer, sheet_name=sheet_name, index=False)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-dir", default="output")
+    parser.add_argument("--excel-name", default="taipower_loadareas.xlsx")
+    parser.add_argument("--sheet-name", default="loadareas")
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
-    target_date = datetime.now().strftime("%Y-%m-%d")
 
+    target_date = datetime.now().strftime("%Y-%m-%d")
     csv_text = fetch_csv_text_with_browser()
     df = parse_csv_text(csv_text, target_date)
 
-    output_path = Path(args.output_dir) / f"taipower_loadareas_{target_date}_0000_1150.csv"
-    df.to_csv(output_path, index=False, encoding="utf-8-sig")
+    output_path = Path(args.output_dir) / args.excel_name
+    upsert_excel(df, output_path, args.sheet_name)
 
     print(f"saved: {output_path}")
-    print(f"rows: {len(df)}")
+    print(f"sheet: {args.sheet_name}")
+    print(f"date: {target_date}")
+    print(f"rows_written_today: {len(df)}")
 
 
 if __name__ == "__main__":

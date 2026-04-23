@@ -1,0 +1,47 @@
+name: Check Taipower Tariff Cost Structure PDF
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 台灣時間每週一 09:05 = UTC 每週一 01:05
+    - cron: "5 1 * * 1"
+
+permissions:
+  contents: write
+
+jobs:
+  check-pdf:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install chromium
+
+      - name: Run PDF watcher
+        id: watcher
+        run: |
+          python scripts/tariff_cost_structure_pdf_watcher.py | tee output.txt
+          if grep -q "UPDATED=true" output.txt; then
+            echo "updated=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit changes
+        if: steps.watcher.outputs.updated == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/tariff_cost_structure_pdf/
+          git commit -m "chore: update Taipower tariff cost structure PDF"
+          git push

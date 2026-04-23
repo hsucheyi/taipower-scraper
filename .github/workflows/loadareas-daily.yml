@@ -33,10 +33,10 @@ jobs:
       - name: Run scraper
         run: python taipower_loadareas_daily.py --output-dir output
 
-      - name: Commit CSV
+      - name: Commit outputs
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
-          git add output/*.csv
-          git commit -m "update data" || echo "no changes"
+          git add output/*.csv output/*.xlsx
+          git commit -m "update loadareas data" || echo "no changes"
           git push

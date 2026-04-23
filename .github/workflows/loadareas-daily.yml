@@ -1,8 +1,8 @@
 name: Taipower Scraper
 
 on:
-  # schedule:
-  #   - cron: '55 15 * * *'   # 台灣時間 23:55
+  schedule:
+    - cron: '55 15 * * *'   # 台灣時間 23:55
   workflow_dispatch:
 
 jobs:

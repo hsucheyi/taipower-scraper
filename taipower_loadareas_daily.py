@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 from playwright.sync_api import sync_playwright
 
+ENTRY_URL = "https://www.taipower.com.tw/"
 CSV_URL = "https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv"
 
 
@@ -34,23 +35,33 @@ def fetch_csv_text_with_browser() -> str:
                 "Chrome/124.0.0.0 Safari/537.36"
             ),
         )
+        page = context.new_page()
 
-        resp = context.request.get(
-            CSV_URL + "?_ts=" + str(int(datetime.now().timestamp())),
-            headers={
-                "Accept": "text/csv, text/plain, */*",
-                "Referer": "https://www.taipower.com.tw/",
-                "Cache-Control": "no-cache",
-                "Pragma": "no-cache",
-            },
-            timeout=60000,
+        # 不進會 403 的圖表頁，先進首頁建立正常第一方瀏覽器脈絡
+        resp = page.goto(ENTRY_URL, wait_until="domcontentloaded", timeout=60000)
+        if resp is None:
+            raise RuntimeError("failed to open entry page")
+        if resp.status >= 400:
+            raise RuntimeError(f"entry page failed: HTTP {resp.status}")
+
+        csv_text = page.evaluate(
+            """async (url) => {
+                const r = await fetch(url, {
+                    method: 'GET',
+                    credentials: 'include',
+                    cache: 'no-store',
+                    headers: {
+                        'Accept': 'text/csv, text/plain, */*'
+                    }
+                });
+                if (!r.ok) {
+                    throw new Error(`csv fetch failed: HTTP ${r.status}`);
+                }
+                return await r.text();
+            }""",
+            CSV_URL + "?_ts=" + String(Date.now()),
         )
 
-        if not resp.ok:
-            browser.close()
-            raise RuntimeError(f"csv fetch failed: HTTP {resp.status}")
-
-        csv_text = resp.text()
         browser.close()
 
     csv_text = (csv_text or "").strip()
@@ -61,8 +72,6 @@ def fetch_csv_text_with_browser() -> str:
 
 
 def parse_csv_text(csv_text: str, target_date: str) -> pd.DataFrame:
-    # 台電這個 CSV 沒有欄名，通常是：
-    # 時間, 東部, 北部, 中部, 南部
     raw = pd.read_csv(io.StringIO(csv_text), header=None)
 
     if raw.shape[1] < 5:
@@ -72,8 +81,6 @@ def parse_csv_text(csv_text: str, target_date: str) -> pd.DataFrame:
     raw.columns = ["time", "east", "north", "center", "south"]
 
     raw["time"] = raw["time"].astype(str).map(normalize_time_str)
-
-    # 只保留當天完整區間 00:00 ~ 23:50
     raw = raw[(raw["time"] >= "00:00") & (raw["time"] <= "23:50")].copy()
 
     if raw.empty:

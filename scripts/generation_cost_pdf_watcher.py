@@ -5,6 +5,7 @@ import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urljoin
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
@@ -42,69 +43,29 @@ def save_metadata(data: dict) -> None:
     )
 
 
-def collect_anchor_candidates(page) -> list[dict]:
-    anchors = page.locator("a")
-    count = anchors.count()
-    results: list[dict] = []
+def extract_pdf_info_from_html(html: str) -> tuple[str, str]:
+    # 先抓完整的 media pdf 連結
+    media_match = re.search(r'(/media/[^"\']+?\.pdf)', html, flags=re.IGNORECASE)
+    if not media_match:
+        raise RuntimeError("HTML 中找不到 PDF URL")
 
-    for i in range(count):
-        a = anchors.nth(i)
-        try:
-            text = a.inner_text(timeout=1000).strip()
-        except Exception:
-            text = ""
+    pdf_url = urljoin(PAGE_URL, media_match.group(1).replace("&amp;", "&"))
 
-        try:
-            href = a.get_attribute("href", timeout=1000) or ""
-        except Exception:
-            href = ""
+    # 再抓顯示文字，抓不到就用預設名
+    title_match = re.search(
+        r'(各種發電方式之發電成本[^<"\']*\(PDF\))',
+        html,
+        flags=re.IGNORECASE,
+    )
+    title = title_match.group(1).strip() if title_match else "各種發電方式之發電成本(PDF)"
 
-        if text or href:
-            results.append(
-                {
-                    "index": i,
-                    "text": text,
-                    "href": href,
-                }
-            )
-    return results
+    return pdf_url, title
 
 
-def choose_pdf_candidate(candidates: list[dict]) -> dict | None:
-    # 1. 最精準：文字同時含主題與 PDF
-    for item in candidates:
-        text = item["text"]
-        if "各種發電方式之發電成本" in text and "PDF" in text.upper():
-            return item
-
-    # 2. 文字含主題且 href 指向 pdf
-    for item in candidates:
-        text = item["text"]
-        href = item["href"]
-        if "各種發電方式之發電成本" in text and ".pdf" in href.lower():
-            return item
-
-    # 3. href 為 pdf，且文字提到發電成本
-    for item in candidates:
-        text = item["text"]
-        href = item["href"]
-        if ".pdf" in href.lower() and "發電成本" in text:
-            return item
-
-    # 4. 最後退一步：任何文字含 PDF 的連結
-    for item in candidates:
-        text = item["text"]
-        if "PDF" in text.upper():
-            return item
-
-    return None
-
-
-def download_pdf_via_browser() -> tuple[bytes, str, str]:
+def fetch_html_and_pdf() -> tuple[bytes, str, str]:
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
-            accept_downloads=True,
             user_agent=(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -112,6 +73,7 @@ def download_pdf_via_browser() -> tuple[bytes, str, str]:
             ),
             locale="zh-TW",
         )
+
         page = context.new_page()
 
         try:
@@ -120,55 +82,35 @@ def download_pdf_via_browser() -> tuple[bytes, str, str]:
                 page.wait_for_load_state("networkidle", timeout=10000)
             except PlaywrightTimeoutError:
                 pass
-        except Exception:
+
+            html = page.content()
+
+            print("HTML_LENGTH=", len(html))
+
+            pdf_url, title = extract_pdf_info_from_html(html)
+            print(f"FOUND_TITLE={title}")
+            print(f"FOUND_PDF_URL={pdf_url}")
+
+            # 用 Playwright 自己的 request context 下載，比 requests 更像真實瀏覽器
+            resp = context.request.get(pdf_url, timeout=60000)
+            if not resp.ok:
+                raise RuntimeError(f"PDF 下載失敗: status={resp.status}")
+
+            pdf_bytes = resp.body()
+            if not pdf_bytes:
+                raise RuntimeError("PDF 內容為空")
+
+            return pdf_bytes, title, pdf_url
+
+        finally:
             browser.close()
-            raise
-
-        candidates = collect_anchor_candidates(page)
-
-        print("ANCHOR_CANDIDATES_START")
-        for item in candidates[:80]:
-            print(
-                f'[{item["index"]}] text={item["text"]!r} href={item["href"]!r}'
-            )
-        print("ANCHOR_CANDIDATES_END")
-
-        chosen = choose_pdf_candidate(candidates)
-        if not chosen:
-            browser.close()
-            raise RuntimeError("找不到 PDF 連結")
-
-        idx = chosen["index"]
-        title = chosen["text"] or "taipower_generation_cost_pdf"
-        href = chosen["href"] or ""
-
-        target = page.locator("a").nth(idx)
-        target.scroll_into_view_if_needed(timeout=5000)
-
-        with page.expect_download(timeout=60000) as download_info:
-            target.click(timeout=10000)
-
-        download = download_info.value
-        temp_path = download.path()
-        if not temp_path:
-            browser.close()
-            raise RuntimeError("PDF 已觸發下載，但找不到暫存檔")
-
-        pdf_bytes = Path(temp_path).read_bytes()
-        if not pdf_bytes:
-            browser.close()
-            raise RuntimeError("PDF 下載成功但內容為空")
-
-        final_url = download.url or href
-        browser.close()
-        return pdf_bytes, title, final_url
 
 
 def main() -> int:
     BASE_DIR.mkdir(parents=True, exist_ok=True)
     ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
 
-    pdf_bytes, title, pdf_url = download_pdf_via_browser()
+    pdf_bytes, title, pdf_url = fetch_html_and_pdf()
 
     new_sha = sha256_bytes(pdf_bytes)
     old_metadata = load_metadata()

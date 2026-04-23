@@ -42,6 +42,64 @@ def save_metadata(data: dict) -> None:
     )
 
 
+def collect_anchor_candidates(page) -> list[dict]:
+    anchors = page.locator("a")
+    count = anchors.count()
+    results: list[dict] = []
+
+    for i in range(count):
+        a = anchors.nth(i)
+        try:
+            text = a.inner_text(timeout=1000).strip()
+        except Exception:
+            text = ""
+
+        try:
+            href = a.get_attribute("href", timeout=1000) or ""
+        except Exception:
+            href = ""
+
+        if text or href:
+            results.append(
+                {
+                    "index": i,
+                    "text": text,
+                    "href": href,
+                }
+            )
+    return results
+
+
+def choose_pdf_candidate(candidates: list[dict]) -> dict | None:
+    # 1. 最精準：文字同時含主題與 PDF
+    for item in candidates:
+        text = item["text"]
+        if "各種發電方式之發電成本" in text and "PDF" in text.upper():
+            return item
+
+    # 2. 文字含主題且 href 指向 pdf
+    for item in candidates:
+        text = item["text"]
+        href = item["href"]
+        if "各種發電方式之發電成本" in text and ".pdf" in href.lower():
+            return item
+
+    # 3. href 為 pdf，且文字提到發電成本
+    for item in candidates:
+        text = item["text"]
+        href = item["href"]
+        if ".pdf" in href.lower() and "發電成本" in text:
+            return item
+
+    # 4. 最後退一步：任何文字含 PDF 的連結
+    for item in candidates:
+        text = item["text"]
+        if "PDF" in text.upper():
+            return item
+
+    return None
+
+
 def download_pdf_via_browser() -> tuple[bytes, str, str]:
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -58,53 +116,52 @@ def download_pdf_via_browser() -> tuple[bytes, str, str]:
 
         try:
             page.goto(PAGE_URL, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_load_state("networkidle", timeout=60000)
-        except PlaywrightTimeoutError:
-            # 某些網站 networkidle 可能不穩，至少頁面已打開就繼續找連結
-            pass
-
-        # 優先找 href 直接含 .pdf 的連結
-        pdf_link = page.locator("a[href*='.pdf']").first
-        title = ""
-        pdf_url = ""
-
-        if pdf_link.count() > 0:
-            title = pdf_link.inner_text().strip()
-            pdf_url = pdf_link.get_attribute("href") or ""
-
-            with page.expect_download(timeout=60000) as download_info:
-                pdf_link.click()
-
-            download = download_info.value
-            temp_path = download.path()
-            pdf_bytes = Path(temp_path).read_bytes() if temp_path else b""
-            if not pdf_bytes:
-                raise RuntimeError("PDF 下載成功但檔案內容為空")
-
+            try:
+                page.wait_for_load_state("networkidle", timeout=10000)
+            except PlaywrightTimeoutError:
+                pass
+        except Exception:
             browser.close()
-            return pdf_bytes, title, download.url
+            raise
 
-        # 備援：找文字含 PDF 的連結
-        text_link = page.locator("a", has_text="PDF").first
-        if text_link.count() == 0:
+        candidates = collect_anchor_candidates(page)
+
+        print("ANCHOR_CANDIDATES_START")
+        for item in candidates[:80]:
+            print(
+                f'[{item["index"]}] text={item["text"]!r} href={item["href"]!r}'
+            )
+        print("ANCHOR_CANDIDATES_END")
+
+        chosen = choose_pdf_candidate(candidates)
+        if not chosen:
             browser.close()
             raise RuntimeError("找不到 PDF 連結")
 
-        title = text_link.inner_text().strip()
-        pdf_url = text_link.get_attribute("href") or ""
+        idx = chosen["index"]
+        title = chosen["text"] or "taipower_generation_cost_pdf"
+        href = chosen["href"] or ""
+
+        target = page.locator("a").nth(idx)
+        target.scroll_into_view_if_needed(timeout=5000)
 
         with page.expect_download(timeout=60000) as download_info:
-            text_link.click()
+            target.click(timeout=10000)
 
         download = download_info.value
         temp_path = download.path()
-        pdf_bytes = Path(temp_path).read_bytes() if temp_path else b""
+        if not temp_path:
+            browser.close()
+            raise RuntimeError("PDF 已觸發下載，但找不到暫存檔")
+
+        pdf_bytes = Path(temp_path).read_bytes()
         if not pdf_bytes:
             browser.close()
-            raise RuntimeError("PDF 下載成功但檔案內容為空")
+            raise RuntimeError("PDF 下載成功但內容為空")
 
+        final_url = download.url or href
         browser.close()
-        return pdf_bytes, title, download.url or pdf_url
+        return pdf_bytes, title, final_url
 
 
 def main() -> int:

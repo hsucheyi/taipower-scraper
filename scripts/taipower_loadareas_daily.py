@@ -36,34 +36,59 @@ def fetch_csv_text_with_browser() -> str:
                 "Chrome/124.0.0.0 Safari/537.36"
             ),
         )
-
         page = context.new_page()
 
-        # 先造訪首頁，讓 cookie 和 session 建立
+        csv_text_holder = {}
+
+        def handle_response(response):
+            if "loadareas.csv" in response.url:
+                try:
+                    csv_text_holder["data"] = response.text()
+                except Exception as e:
+                    print(f"Warning: failed to read CSV response body: {e}")
+
+        page.on("response", handle_response)
+
+        # Step 1: 先進首頁取得 cookie
         try:
-            page.goto(ENTRY_URL, wait_until="domcontentloaded", timeout=60_000)
+            page.goto(ENTRY_URL, wait_until="domcontentloaded", timeout=60000)
         except Exception as e:
-            print(f"Warning: entry page failed, continue to fetch CSV: {e}")
+            print(f"Warning: entry page failed, continue: {e}")
 
-        # 用 context.request.get() 發請求，自動帶入首頁累積的 cookie
-        ts = int(datetime.now(TAIPEI_TZ).timestamp())
-        url = f"{CSV_URL}?_ts={ts}"
-        response = context.request.get(
-            url,
-            headers={
-                "Referer": "https://www.taipower.com.tw/",
-                "Accept": "text/csv, text/plain, */*",
-                "Origin": "https://www.taipower.com.tw",
-            },
-        )
+        # Step 2: 若首頁沒觸發 CSV，導覽到含圖表的頁面，等頁面 JS 自動打 CSV
+        if "data" not in csv_text_holder:
+            try:
+                page.goto(
+                    "https://www.taipower.com.tw/tc/page.aspx?mid=97",
+                    wait_until="domcontentloaded",
+                    timeout=60000,
+                )
+                page.wait_for_timeout(5000)
+            except Exception as e:
+                print(f"Warning: load areas page failed: {e}")
 
-        if not response.ok:
-            raise RuntimeError(f"csv fetch failed: HTTP {response.status}")
+        # Step 3: 若前兩步都沒攔到，直接 navigate 到 CSV URL
+        if "data" not in csv_text_holder:
+            try:
+                ts = int(datetime.now(TAIPEI_TZ).timestamp())
+                response = page.goto(
+                    CSV_URL + f"?_ts={ts}",
+                    wait_until="domcontentloaded",
+                    timeout=60000,
+                )
+                if response and response.ok:
+                    csv_text_holder["data"] = response.text()
+                else:
+                    status = response.status if response else "no response"
+                    raise RuntimeError(f"csv fetch failed: HTTP {status}")
+            except RuntimeError:
+                raise
+            except Exception as e:
+                raise RuntimeError(f"csv fetch failed: {e}")
 
-        csv_text = response.text()
         browser.close()
 
-        csv_text = (csv_text or "").strip()
+        csv_text = csv_text_holder.get("data", "").strip()
         if not csv_text:
             raise RuntimeError("empty CSV response")
         return csv_text
@@ -154,7 +179,6 @@ def main():
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
-
     target_date = datetime.now(TAIPEI_TZ).strftime("%Y-%m-%d")
 
     csv_text = fetch_csv_text_with_browser()

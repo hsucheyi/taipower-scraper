@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 from playwright.sync_api import sync_playwright
 
-ENTRY_URL = "https://www.taipower.com.tw/"
+ENTRY_URL = "https://www.taipower.com.tw/d006/loadGraph/loadGraph/load_areas_.html"
 CSV_URL = "https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv"
 TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 
@@ -50,10 +50,10 @@ def fetch_csv_text_with_browser() -> str:
             )
 
             if resp is None:
-                raise RuntimeError("failed to open entry page")
+                raise RuntimeError("failed to open loadareas entry page")
 
             if resp.status >= 400:
-                raise RuntimeError(f"entry page failed: HTTP {resp.status}")
+                raise RuntimeError(f"loadareas entry page failed: HTTP {resp.status}")
 
             ts = str(int(datetime.now(TAIPEI_TZ).timestamp()))
 

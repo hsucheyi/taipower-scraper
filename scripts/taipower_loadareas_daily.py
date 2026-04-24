@@ -4,6 +4,7 @@ import io
 import os
 import sys
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 import pandas as pd
@@ -11,6 +12,7 @@ from playwright.sync_api import sync_playwright
 
 ENTRY_URL = "https://www.taipower.com.tw/"
 CSV_URL = "https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv"
+TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 
 
 def normalize_time_str(t: str) -> str:
@@ -39,11 +41,10 @@ def fetch_csv_text_with_browser() -> str:
         page = context.new_page()
 
         # 改成先進台電首頁，不進容易 403 的 load_areas_.html
-        resp = page.goto(ENTRY_URL, wait_until="domcontentloaded", timeout=60000)
-        if resp is None:
-            raise RuntimeError("failed to open entry page")
-        if resp.status >= 400:
-            raise RuntimeError(f"entry page failed: HTTP {resp.status}")
+        try:
+            page.goto(ENTRY_URL, wait_until="domcontentloaded", timeout=60000)
+        except Exception as e:
+            print(f"Warning: entry page failed, continue to fetch CSV: {e}")
 
         csv_text = page.evaluate(
             """async (url) => {
@@ -60,7 +61,7 @@ def fetch_csv_text_with_browser() -> str:
                 }
                 return await r.text();
             }""",
-            CSV_URL + "?_ts=" + str(int(datetime.now().timestamp()))
+            CSV_URL + "?_ts=" + str(int(datetime.now(TAIPEI_TZ).timestamp()))
         )
 
         browser.close()
@@ -164,7 +165,7 @@ def main():
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
-    target_date = datetime.now().strftime("%Y-%m-%d")
+    target_date = datetime.now(TAIPEI_TZ).strftime("%Y-%m-%d")
 
     csv_text = fetch_csv_text_with_browser()
     df = parse_csv_text(csv_text, target_date)

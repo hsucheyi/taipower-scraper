@@ -2,7 +2,7 @@ name: Taipower Loadareas Daily
 
 on:
   schedule:
-    - cron: "55 15 * * *" # 台灣時間 23:55
+    - cron: "55 14 * * *" # 台灣時間 23:55
   workflow_dispatch:
 
 permissions:

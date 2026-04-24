@@ -3,7 +3,6 @@ import csv
 import io
 import os
 import sys
-import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -14,20 +13,6 @@ from playwright.sync_api import sync_playwright
 ENTRY_URL = "https://www.taipower.com.tw/"
 CSV_URL = "https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv"
 TAIPEI_TZ = ZoneInfo("Asia/Taipei")
-
-
-def wait_until_taipei(target_hhmm: str) -> None:
-    """等到台北時間 target_hhmm（例如 '23:51'）才繼續執行"""
-    th, tm = map(int, target_hhmm.split(":"))
-    while True:
-        now = datetime.now(TAIPEI_TZ)
-        if (now.hour, now.minute) >= (th, tm):
-            print(f"Reached target time {target_hhmm}, starting scrape. now={now.strftime('%H:%M:%S')} Taipei")
-            break
-        total_wait = ((th * 60 + tm) - (now.hour * 60 + now.minute)) * 60 - now.second
-        sleep_sec = max(1, min(total_wait, 30))  # 每次最多睡 30 秒，避免 job timeout
-        print(f"Waiting until {target_hhmm} Taipei time... now={now.strftime('%H:%M:%S')}, {total_wait}s remaining")
-        time.sleep(sleep_sec)
 
 
 def normalize_time_str(t: str) -> str:
@@ -166,12 +151,7 @@ def main():
     parser.add_argument("--output-dir", default="output")
     parser.add_argument("--excel-name", default="taipower_loadareas_all.xlsx")
     parser.add_argument("--sheet-name", default="loadareas")
-    parser.add_argument("--no-wait", action="store_true", help="跳過等待，直接執行（本機測試用）")
     args = parser.parse_args()
-
-    # 等到台灣時間 23:51 才抓資料（手動補跑或本機測試可加 --no-wait 跳過）
-    if not args.no_wait:
-        wait_until_taipei("23:51")
 
     os.makedirs(args.output_dir, exist_ok=True)
 

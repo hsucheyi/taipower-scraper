@@ -2,8 +2,8 @@ name: Taipower Loadareas Daily
 
 on:
   schedule:
-    - cron: "40 15 * * *"  # UTC 15:40 = 台灣 23:40，提早啟動，腳本內等到 23:51 才抓
-  workflow_dispatch:  # 手動補跑用，自動跳過等待
+    - cron: "40 15 * * *"  # UTC 15:40 = 台灣 23:40，提早 11 分鐘啟動，腳本內等到 23:51 才抓
+  workflow_dispatch:  # 手動補跑用
 
 permissions:
   contents: write
@@ -30,13 +30,8 @@ jobs:
         run: |
           python -m playwright install --with-deps chromium
 
-      - name: Run scraper
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            python scripts/taipower_loadareas_daily.py --output-dir output --no-wait
-          else
-            python scripts/taipower_loadareas_daily.py --output-dir output
-          fi
+      - name: Run python scripts/taipower_loadareas_daily.py --output-dir output
+        run: python scripts/taipower_loadareas_daily.py --output-dir output
 
       - name: Commit outputs
         run: |

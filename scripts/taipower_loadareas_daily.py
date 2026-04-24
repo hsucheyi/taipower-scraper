@@ -5,12 +5,14 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 from playwright.sync_api import sync_playwright
 
 ENTRY_URL = "https://www.taipower.com.tw/"
 CSV_URL = "https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv"
+TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 
 
 def normalize_time_str(t: str) -> str:
@@ -28,47 +30,64 @@ def normalize_time_str(t: str) -> str:
 def fetch_csv_text_with_browser() -> str:
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            locale="zh-TW",
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0.0.0 Safari/537.36"
-            ),
-        )
-        page = context.new_page()
 
-        # 改成先進台電首頁，不進容易 403 的 load_areas_.html
-        resp = page.goto(ENTRY_URL, wait_until="domcontentloaded", timeout=60000)
-        if resp is None:
-            raise RuntimeError("failed to open entry page")
-        if resp.status >= 400:
-            raise RuntimeError(f"entry page failed: HTTP {resp.status}")
+        try:
+            context = browser.new_context(
+                locale="zh-TW",
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
+            )
 
-        csv_text = page.evaluate(
-            """async (url) => {
-                const r = await fetch(url, {
-                    method: 'GET',
-                    credentials: 'include',
-                    cache: 'no-store',
-                    headers: {
-                        'Accept': 'text/csv, text/plain, */*'
+            page = context.new_page()
+
+            resp = page.goto(
+                ENTRY_URL,
+                wait_until="domcontentloaded",
+                timeout=60000,
+            )
+
+            if resp is None:
+                raise RuntimeError("failed to open entry page")
+
+            if resp.status >= 400:
+                raise RuntimeError(f"entry page failed: HTTP {resp.status}")
+
+            ts = str(int(datetime.now(TAIPEI_TZ).timestamp()))
+
+            csv_text = page.evaluate(
+                """
+                async (url) => {
+                    const r = await fetch(url, {
+                        method: 'GET',
+                        credentials: 'include',
+                        cache: 'no-store',
+                        headers: {
+                            'Accept': 'text/csv, text/plain, */*'
+                        }
+                    });
+
+                    if (!r.ok) {
+                        throw new Error(`csv fetch failed: HTTP ${r.status}`);
                     }
-                });
-                if (!r.ok) {
-                    throw new Error(`csv fetch failed: HTTP ${r.status}`);
+
+                    return await r.text();
                 }
-                return await r.text();
-            }""",
-            CSV_URL + "?_ts=" + str(int(datetime.now().timestamp()))
-        )
+                """,
+                CSV_URL + "?_ts=" + ts,
+            )
 
-        browser.close()
+        finally:
+            browser.close()
 
-        csv_text = (csv_text or "").strip()
-        if not csv_text:
-            raise RuntimeError("empty CSV response")
-        return csv_text
+    csv_text = (csv_text or "").strip()
+
+    if not csv_text:
+        raise RuntimeError("empty CSV response")
+
+    return csv_text
 
 
 def parse_csv_text(csv_text: str, target_date: str) -> pd.DataFrame:
@@ -80,10 +99,12 @@ def parse_csv_text(csv_text: str, target_date: str) -> pd.DataFrame:
             continue
 
         row = [str(x).strip() for x in row[:5]]
+
         if len(row) < 5:
             continue
 
         raw_time = row[0]
+
         try:
             t = normalize_time_str(raw_time)
             datetime.strptime(t, "%H:%M")
@@ -125,19 +146,27 @@ def parse_csv_text(csv_text: str, target_date: str) -> pd.DataFrame:
     if not rows:
         raise RuntimeError("parsed 0 rows from CSV")
 
-    df = pd.DataFrame(rows).sort_values(["date", "time"]).reset_index(drop=True)
+    df = pd.DataFrame(rows)
+    df = df.sort_values(["date", "time"]).reset_index(drop=True)
+
     return df
 
 
 def upsert_excel(df_new: pd.DataFrame, excel_path: Path, sheet_name: str) -> None:
     if excel_path.exists():
         try:
-            df_old = pd.read_excel(excel_path, sheet_name=sheet_name, engine="openpyxl")
+            df_old = pd.read_excel(
+                excel_path,
+                sheet_name=sheet_name,
+                engine="openpyxl",
+            )
         except Exception:
             df_old = pd.DataFrame(columns=df_new.columns)
 
         if "date" in df_old.columns:
-            df_old = df_old[df_old["date"].astype(str) != df_new["date"].iloc[0]]
+            df_old = df_old[
+                df_old["date"].astype(str) != str(df_new["date"].iloc[0])
+            ]
 
         df_all = pd.concat([df_old, df_new], ignore_index=True)
     else:
@@ -164,12 +193,16 @@ def main():
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
-    target_date = datetime.now().strftime("%Y-%m-%d")
+
+    target_date = datetime.now(TAIPEI_TZ).strftime("%Y-%m-%d")
 
     csv_text = fetch_csv_text_with_browser()
     df = parse_csv_text(csv_text, target_date)
 
-    csv_output_path = Path(args.output_dir) / f"taipower_loadareas_{target_date}_0000_2350.csv"
+    csv_output_path = (
+        Path(args.output_dir)
+        / f"taipower_loadareas_{target_date}_0000_2350.csv"
+    )
     df.to_csv(csv_output_path, index=False, encoding="utf-8-sig")
 
     excel_output_path = Path(args.output_dir) / args.excel_name
@@ -178,6 +211,7 @@ def main():
     print(f"saved csv: {csv_output_path}")
     print(f"saved excel: {excel_output_path}")
     print(f"sheet: {args.sheet_name}")
+    print(f"date: {target_date}")
     print(f"rows: {len(df)}")
 
 

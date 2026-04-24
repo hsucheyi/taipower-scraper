@@ -38,57 +38,51 @@ def fetch_csv_text_with_browser() -> str:
         )
         page = context.new_page()
 
-        csv_text_holder = {}
-
-        def handle_response(response):
-            if "loadareas.csv" in response.url:
-                try:
-                    csv_text_holder["data"] = response.text()
-                except Exception as e:
-                    print(f"Warning: failed to read CSV response body: {e}")
-
-        page.on("response", handle_response)
-
         # Step 1: 先進首頁取得 cookie
         try:
             page.goto(ENTRY_URL, wait_until="domcontentloaded", timeout=60000)
         except Exception as e:
             print(f"Warning: entry page failed, continue: {e}")
 
-        # Step 2: 若首頁沒觸發 CSV，導覽到含圖表的頁面，等頁面 JS 自動打 CSV
-        if "data" not in csv_text_holder:
-            try:
+        # Step 2: 導覽到圖表頁，用 expect_response 等待 CSV 回應
+        # expect_response 會在 with 區塊內的操作觸發符合 URL 的回應時捕捉
+        csv_text = None
+
+        try:
+            with page.expect_response(
+                lambda r: "loadareas.csv" in r.url and r.status == 200,
+                timeout=15000,
+            ) as response_info:
                 page.goto(
                     "https://www.taipower.com.tw/tc/page.aspx?mid=97",
                     wait_until="domcontentloaded",
                     timeout=60000,
                 )
-                page.wait_for_timeout(5000)
-            except Exception as e:
-                print(f"Warning: load areas page failed: {e}")
+            # 在 with 區塊結束後才呼叫 .value，此時 response 已完整
+            csv_text = response_info.value.text()
+        except Exception as e:
+            print(f"Warning: expect_response on mid=97 failed: {e}")
 
-        # Step 3: 若前兩步都沒攔到，直接 navigate 到 CSV URL
-        if "data" not in csv_text_holder:
+        # Step 3: 若圖表頁沒有觸發，直接 navigate 到 CSV URL
+        if not csv_text:
             try:
                 ts = int(datetime.now(TAIPEI_TZ).timestamp())
-                response = page.goto(
-                    CSV_URL + f"?_ts={ts}",
-                    wait_until="domcontentloaded",
-                    timeout=60000,
-                )
-                if response and response.ok:
-                    csv_text_holder["data"] = response.text()
-                else:
-                    status = response.status if response else "no response"
-                    raise RuntimeError(f"csv fetch failed: HTTP {status}")
-            except RuntimeError:
-                raise
+                with page.expect_response(
+                    lambda r: "loadareas.csv" in r.url and r.status == 200,
+                    timeout=15000,
+                ) as response_info:
+                    page.goto(
+                        CSV_URL + f"?_ts={ts}",
+                        wait_until="domcontentloaded",
+                        timeout=60000,
+                    )
+                csv_text = response_info.value.text()
             except Exception as e:
                 raise RuntimeError(f"csv fetch failed: {e}")
 
         browser.close()
 
-        csv_text = csv_text_holder.get("data", "").strip()
+        csv_text = (csv_text or "").strip()
         if not csv_text:
             raise RuntimeError("empty CSV response")
         return csv_text

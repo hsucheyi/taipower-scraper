@@ -31,7 +31,7 @@ jobs:
           python -m playwright install --with-deps chromium
 
       - name: Run scraper
-        run: python scripts/taipower_loadareas_daily.py --output-dir output
+        run: python scripts/loadareas_daily.py --output-dir output
 
       - name: Commit outputs
         run: |

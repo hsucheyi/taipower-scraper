@@ -3,7 +3,6 @@ import csv
 import io
 import os
 import sys
-import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -14,20 +13,6 @@ from playwright.sync_api import sync_playwright
 ENTRY_URL = "https://www.taipower.com.tw/"
 CSV_URL = "https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv"
 TAIPEI_TZ = ZoneInfo("Asia/Taipei")
-
-
-def wait_until_taipei(target_hhmm: str) -> None:
-    """等到台北時間 target_hhmm（例如 '23:51'）才繼續執行"""
-    th, tm = map(int, target_hhmm.split(":"))
-    while True:
-        now = datetime.now(TAIPEI_TZ)
-        if (now.hour, now.minute) >= (th, tm):
-            print(f"Reached target time {target_hhmm}, starting scrape. now={now.strftime('%H:%M:%S')} Taipei")
-            break
-        total_wait = ((th * 60 + tm) - (now.hour * 60 + now.minute)) * 60 - now.second
-        sleep_sec = max(1, min(total_wait, 30))
-        print(f"Waiting until {target_hhmm} Taipei time... now={now.strftime('%H:%M:%S')}, {total_wait}s remaining")
-        time.sleep(sleep_sec)
 
 
 def normalize_time_str(t: str) -> str:
@@ -51,27 +36,31 @@ def fetch_csv_text_with_browser() -> str:
                 "Chrome/124.0.0.0 Safari/537.36"
             ),
         )
+
         page = context.new_page()
 
-        # 步驟1：先造訪首頁，建立 session / cookie
+        # 先造訪首頁，讓 cookie 和 session 建立
         try:
             page.goto(ENTRY_URL, wait_until="domcontentloaded", timeout=60_000)
         except Exception as e:
-            print(f"Warning: entry page failed, continue: {e}")
+            print(f"Warning: entry page failed, continue to fetch CSV: {e}")
 
-        # 步驟2：用 page.goto() 直接導航到 CSV URL
-        # 讓 Chromium 以完整瀏覽器行為請求，比 fetch()/context.request 更難被封鎖
+        # 用 context.request.get() 發請求，自動帶入首頁累積的 cookie
         ts = int(datetime.now(TAIPEI_TZ).timestamp())
         url = f"{CSV_URL}?_ts={ts}"
+        response = context.request.get(
+            url,
+            headers={
+                "Referer": "https://www.taipower.com.tw/",
+                "Accept": "text/csv, text/plain, */*",
+                "Origin": "https://www.taipower.com.tw",
+            },
+        )
 
-        response = page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+        if not response.ok:
+            raise RuntimeError(f"csv fetch failed: HTTP {response.status}")
 
-        if response is None or not response.ok:
-            status = response.status if response else "no response"
-            raise RuntimeError(f"csv fetch failed: HTTP {status}")
-
-        # 取得頁面文字內容（CSV 會被瀏覽器以純文字顯示）
-        csv_text = page.inner_text("body") or page.content()
+        csv_text = response.text()
         browser.close()
 
         csv_text = (csv_text or "").strip()
@@ -162,11 +151,7 @@ def main():
     parser.add_argument("--output-dir", default="output")
     parser.add_argument("--excel-name", default="taipower_loadareas_all.xlsx")
     parser.add_argument("--sheet-name", default="loadareas")
-    parser.add_argument("--no-wait", action="store_true", help="跳過等待，直接執行（本機測試用）")
     args = parser.parse_args()
-
-    if not args.no_wait:
-        wait_until_taipei("23:51")
 
     os.makedirs(args.output_dir, exist_ok=True)
 

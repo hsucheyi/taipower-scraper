@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 from playwright.sync_api import sync_playwright
 
-ENTRY_URL = "https://www.taipower.com.tw/d006/loadGraph/loadGraph/load_areas_.html"
+ENTRY_URL = "https://www.taipower.com.tw/"
 CSV_URL = "https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv"
 TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 
@@ -43,17 +43,16 @@ def fetch_csv_text_with_browser() -> str:
 
             page = context.new_page()
 
-            resp = page.goto(
-                ENTRY_URL,
-                wait_until="domcontentloaded",
-                timeout=60000,
-            )
-
-            if resp is None:
-                raise RuntimeError("failed to open loadareas entry page")
-
-            if resp.status >= 400:
-                raise RuntimeError(f"loadareas entry page failed: HTTP {resp.status}")
+            # 沿用原本成功版本的概念：先建立瀏覽器 context。
+            # 但不要因為入口頁 403 就中止，真正要成功的是後面的 CSV fetch。
+            try:
+                page.goto(
+                    ENTRY_URL,
+                    wait_until="domcontentloaded",
+                    timeout=60000,
+                )
+            except Exception as e:
+                print(f"Warning: entry page failed, continue to fetch CSV: {e}")
 
             ts = str(int(datetime.now(TAIPEI_TZ).timestamp()))
 
@@ -146,9 +145,7 @@ def parse_csv_text(csv_text: str, target_date: str) -> pd.DataFrame:
     if not rows:
         raise RuntimeError("parsed 0 rows from CSV")
 
-    df = pd.DataFrame(rows)
-    df = df.sort_values(["date", "time"]).reset_index(drop=True)
-
+    df = pd.DataFrame(rows).sort_values(["date", "time"]).reset_index(drop=True)
     return df
 
 

@@ -10,7 +10,7 @@ from pathlib import Path
 import pandas as pd
 from playwright.sync_api import sync_playwright
 
-ENTRY_URL = "https://www.taipower.com.tw/"
+ENTRY_URL = "https://www.taipower.com.tw/tc/page.aspx?mid=97"
 CSV_URL = "https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv"
 TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 
@@ -30,61 +30,82 @@ def fetch_csv_text_with_browser() -> str:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
             locale="zh-TW",
+            timezone_id="Asia/Taipei",
             user_agent=(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/124.0.0.0 Safari/537.36"
             ),
+            extra_http_headers={
+                "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            },
         )
         page = context.new_page()
 
-        # Step 1: 先進首頁取得 cookie
+        # Step 1: 先進首頁，讓瀏覽器取得 cookie 與完整 session
+        print("Step 1: loading entry page...")
         try:
-            page.goto(ENTRY_URL, wait_until="domcontentloaded", timeout=60000)
+            page.goto(
+                "https://www.taipower.com.tw/",
+                wait_until="networkidle",
+                timeout=60000,
+            )
         except Exception as e:
-            print(f"Warning: entry page failed, continue: {e}")
+            print(f"Warning: entry page networkidle timeout, continue: {e}")
 
-        # Step 2: 導覽到圖表頁，用 expect_response 等待 CSV 回應
-        # expect_response 會在 with 區塊內的操作觸發符合 URL 的回應時捕捉
-        csv_text = None
-
+        # Step 2: 再進圖表頁，等頁面穩定
+        print("Step 2: loading chart page...")
         try:
-            with page.expect_response(
-                lambda r: "loadareas.csv" in r.url and r.status == 200,
-                timeout=15000,
-            ) as response_info:
-                page.goto(
-                    "https://www.taipower.com.tw/tc/page.aspx?mid=97",
-                    wait_until="domcontentloaded",
-                    timeout=60000,
-                )
-            # 在 with 區塊結束後才呼叫 .value，此時 response 已完整
-            csv_text = response_info.value.text()
+            page.goto(
+                ENTRY_URL,
+                wait_until="networkidle",
+                timeout=60000,
+            )
         except Exception as e:
-            print(f"Warning: expect_response on mid=97 failed: {e}")
+            print(f"Warning: chart page networkidle timeout, continue: {e}")
 
-        # Step 3: 若圖表頁沒有觸發，直接 navigate 到 CSV URL
-        if not csv_text:
-            try:
-                ts = int(datetime.now(TAIPEI_TZ).timestamp())
-                with page.expect_response(
-                    lambda r: "loadareas.csv" in r.url and r.status == 200,
-                    timeout=15000,
-                ) as response_info:
-                    page.goto(
-                        CSV_URL + f"?_ts={ts}",
-                        wait_until="domcontentloaded",
-                        timeout=60000,
-                    )
-                csv_text = response_info.value.text()
-            except Exception as e:
-                raise RuntimeError(f"csv fetch failed: {e}")
+        # Step 3: 用頁面內的 fetch 發出請求（帶完整 cookie、Referer、Origin）
+        print("Step 3: fetching CSV via in-page fetch...")
+        ts = int(datetime.now(TAIPEI_TZ).timestamp())
+        csv_url_with_ts = f"{CSV_URL}?_ts={ts}"
+
+        result = page.evaluate(
+            """async (url) => {
+                try {
+                    const r = await fetch(url, {
+                        method: 'GET',
+                        credentials: 'include',
+                        cache: 'no-store',
+                        headers: {
+                            'Accept': 'text/csv,text/plain,*/*',
+                            'Referer': 'https://www.taipower.com.tw/tc/page.aspx?mid=97',
+                            'Origin': 'https://www.taipower.com.tw',
+                        }
+                    });
+                    if (!r.ok) {
+                        return { ok: false, status: r.status, body: null };
+                    }
+                    const body = await r.text();
+                    return { ok: true, status: r.status, body: body };
+                } catch (e) {
+                    return { ok: false, status: 0, body: String(e) };
+                }
+            }""",
+            csv_url_with_ts,
+        )
 
         browser.close()
 
-        csv_text = (csv_text or "").strip()
+        if not result.get("ok"):
+            status = result.get("status", "unknown")
+            body = result.get("body", "")
+            raise RuntimeError(f"csv fetch failed: HTTP {status} / {body}")
+
+        csv_text = (result.get("body") or "").strip()
         if not csv_text:
             raise RuntimeError("empty CSV response")
+
         return csv_text
 
 

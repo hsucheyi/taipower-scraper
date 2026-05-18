@@ -1,0 +1,52 @@
+name: Check Taipower Monthly Report PDF
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 台灣時間每週一 09:10 = UTC 每週一 01:10
+    - cron: "10 1 * * 1"
+
+permissions:
+  contents: write
+
+jobs:
+  check-pdf:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Run PDF watcher
+        id: watcher
+        run: |
+          python scripts/monthly_report_pdf_watcher.py | tee output.txt
+
+          echo "==== ls data/monthly_report_pdf ===="
+          ls -R data/monthly_report_pdf || true
+
+          if grep -q "UPDATED=true" output.txt; then
+            echo "updated=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit changes
+        if: steps.watcher.outputs.updated == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/monthly_report_pdf/
+          git diff --cached --quiet || git commit -m "chore: update Taipower monthly report PDF"
+          git push

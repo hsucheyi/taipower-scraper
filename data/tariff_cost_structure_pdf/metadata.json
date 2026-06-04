@@ -1,9 +1,14 @@
 {
-  "page_url": "https://www.taipower.com.tw/2289/2363/2373/2375/10358/normalPost",
-  "pdf_url": "https://www.taipower.com.tw/media/asofe31t/電價及單位成本結構比較-115年3月底止.pdf",
-  "title": "電價及單位成本結構比較-115年3月底止 (PDF)",
-  "sha256": "648e60e89b459aa1cb0010301052b618780dc294cb136f13f87f6c2051d71bf7",
+  "page_url": "https://www.taipower.com.tw/2289/2363/2373/2375/10358/",
+  "canonical_page_url": "https://www.taipower.com.tw/2289/2363/2373/2375/10358/",
+  "fallback_page_urls": [
+    "https://www.taipower.com.tw/2289/2363/2373/2375/10358/",
+    "https://www.taipower.com.tw/2289/2363/2373/2375/10358/normalPost"
+  ],
+  "pdf_url": "https://www.taipower.com.tw/media/disnjnhj/電價及單位成本結構比較-115年4月底止.pdf",
+  "title": "電價及單位成本結構比較-115年4月底止(PDF)",
+  "sha256": "f6a58f8ff2c1a400b2dba82fcde95a78e36399323f6ae2927f27f881e2acc816",
   "latest_file": "data/tariff_cost_structure_pdf/latest.pdf",
-  "archived_file": "data/tariff_cost_structure_pdf/archive/20260511T045909Z_電價及單位成本結構比較-115年3月底止_(PDF).pdf",
-  "fetched_at_utc": "2026-05-11T04:59:09.948118+00:00"
+  "archived_file": "data/tariff_cost_structure_pdf/archive/20260604T062906Z_電價及單位成本結構比較-115年4月底止(PDF).pdf",
+  "fetched_at_utc": "2026-06-04T06:29:06.926975+00:00"
 }

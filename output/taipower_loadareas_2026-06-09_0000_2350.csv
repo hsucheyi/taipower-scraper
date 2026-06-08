@@ -1,0 +1,11 @@
+﻿date,time,east,north,center,south,total,unit,source_url
+2026-06-09,00:00,43.1,1015.7,950.4,940.8,2950.0,萬瓩,https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv
+2026-06-09,00:10,42.2,1021.2,967.1,941.0,2971.5,萬瓩,https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv
+2026-06-09,00:20,42.2,1030.5,950.4,921.9,2945.0,萬瓩,https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv
+2026-06-09,00:30,42.1,1013.8,947.7,929.1,2932.7,萬瓩,https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv
+2026-06-09,00:40,42.2,1002.3,933.0,921.7,2899.2,萬瓩,https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv
+2026-06-09,00:50,41.4,1003.0,928.6,905.9,2878.9,萬瓩,https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv
+2026-06-09,01:00,40.9,991.7,947.0,901.8,2881.4,萬瓩,https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv
+2026-06-09,01:10,40.9,986.0,933.4,896.3,2856.6000000000004,萬瓩,https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv
+2026-06-09,01:20,41.0,979.7,916.1,883.1,2819.9,萬瓩,https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv
+2026-06-09,01:30,40.5,968.6,919.3,880.8,2809.2,萬瓩,https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv

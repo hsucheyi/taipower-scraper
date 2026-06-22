@@ -1,0 +1,17 @@
+﻿date,time,east,north,center,south,total,unit,source_url
+2026-06-23,00:00,44.5,1084.4,931.2,1109.8,3169.9000000000005,萬瓩,https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv
+2026-06-23,00:10,45.7,1073.3,920.5,1114.7,3154.2,萬瓩,https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv
+2026-06-23,00:20,43.9,1074.2,930.9,1100.0,3149.0,萬瓩,https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv
+2026-06-23,00:30,42.8,1059.8,922.7,1093.7,3119.0,萬瓩,https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv
+2026-06-23,00:40,42.7,1077.7,922.3,1075.9,3118.6000000000004,萬瓩,https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv
+2026-06-23,00:50,42.0,1054.3,916.7,1063.6,3076.6,萬瓩,https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv
+2026-06-23,01:00,41.5,1048.5,909.7,1061.6,3061.3,萬瓩,https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv
+2026-06-23,01:10,41.4,1053.2,909.8,1048.0,3052.4,萬瓩,https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv
+2026-06-23,01:20,41.2,1029.5,884.6,1044.3,2999.6000000000004,萬瓩,https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv
+2026-06-23,01:30,40.5,1029.1,902.2,1026.6,2998.3999999999996,萬瓩,https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv
+2026-06-23,01:40,40.4,1018.3,889.6,1024.3,2972.6000000000004,萬瓩,https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv
+2026-06-23,01:50,40.0,1035.1,893.3,1015.1,2983.5,萬瓩,https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv
+2026-06-23,02:00,39.9,1020.3,875.6,1014.8,2950.6000000000004,萬瓩,https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv
+2026-06-23,02:10,39.9,1015.5,883.9,996.7,2936.0,萬瓩,https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv
+2026-06-23,02:20,39.1,1011.1,875.4,985.2,2910.8,萬瓩,https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv
+2026-06-23,02:30,38.7,1012.4,867.9,990.2,2909.2,萬瓩,https://www.taipower.com.tw/d006/loadGraph/loadGraph/data/loadareas.csv

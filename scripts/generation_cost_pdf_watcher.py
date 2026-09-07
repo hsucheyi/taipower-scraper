@@ -77,7 +77,23 @@ def fetch_html_and_pdf() -> tuple[bytes, str, str]:
         page = context.new_page()
 
         try:
-            page.goto(PAGE_URL, wait_until="domcontentloaded", timeout=60000)
+            response = page.goto(
+                PAGE_URL,
+                wait_until="domcontentloaded",
+                timeout=60000
+            )
+            
+            if response is None:
+                raise RuntimeError("page.goto 沒有取得 HTTP response")
+            
+            print("PAGE_STATUS=", response.status)
+            print("FINAL_URL=", page.url)
+            
+            if response.status >= 400:
+                print("PAGE_HTML=", page.content()[:2000])
+                raise RuntimeError(
+                    f"台電頁面存取失敗: HTTP {response.status}"
+                )
             try:
                 page.wait_for_load_state("networkidle", timeout=10000)
             except PlaywrightTimeoutError:
